@@ -16,6 +16,7 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   process.env.FRONTEND_URL,
   'https://mediflow.fr',
+  'https://benevolent-churros-2ce07f.netlify.app',
 ].filter(Boolean);
 
 app.use(cors({
