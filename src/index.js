@@ -39,6 +39,7 @@ app.use('/api/chat',      require('./routes/chat'));
 app.use('/api/ical',      require('./routes/ical'));
 app.use('/api/stripe',    require('./routes/stripe'));
 app.use('/api/reminders', require('./routes/reminders'));
+app.use('/api/cabinets',  require('./routes/cabinets'));
 
 app.get('/health', (req, res) => res.json({
   status: 'ok',
