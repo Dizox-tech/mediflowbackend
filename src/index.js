@@ -17,6 +17,8 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
   'https://mediflow.fr',
   'https://mediflow-ia.netlify.app',
+  'https://losaro.fr',
+  'https://www.losaro.fr',
 ].filter(Boolean);
 
 app.use(cors({
