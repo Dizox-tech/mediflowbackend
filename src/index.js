@@ -20,6 +20,7 @@ const allowedOrigins = [
   'https://losaro-frontend.vercel.app',
 ].filter(Boolean);
 
+// CORS — pour l'instant on garde origin: true le temps de stabiliser, à resserrer plus tard
 app.use(cors({
   origin: true,
   credentials: true,
@@ -27,6 +28,7 @@ app.use(cors({
 
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 
+// JSON body parser sauf pour le webhook Stripe (raw body requis)
 app.use((req, res, next) => {
   if (req.originalUrl === '/api/stripe/webhook') next();
   else express.json({ limit: '1mb' })(req, res, next);
@@ -34,31 +36,44 @@ app.use((req, res, next) => {
 
 app.use((req, res, next) => { logger.debug(`${req.method} ${req.path}`); next(); });
 
-app.use('/api/chat',      require('./routes/chat'));
-app.use('/api/ical',      require('./routes/ical'));
-app.use('/api/stripe',    require('./routes/stripe'));
-app.use('/api/reminders', require('./routes/reminders'));
-app.use('/api/cabinets',  require('./routes/cabinets'));
+// ═══════════ ROUTES LOSARO ═══════════
 app.use('/api/auth',      require('./routes/auth'));
+app.use('/api/cabinets',  require('./routes/cabinets'));
+app.use('/api/clients',   require('./routes/clients'));
+app.use('/api/factures',  require('./routes/factures'));
+app.use('/api/devis',     require('./routes/devis'));
+app.use('/api/reminders', require('./routes/reminders'));
+app.use('/api/chat',      require('./routes/chat'));
+app.use('/api/stripe',    require('./routes/stripe'));
 
+// ═══════════ HEALTH ═══════════
 app.get('/health', (req, res) => res.json({
   status: 'ok',
-  version: '1.0.0',
+  service: 'losaro-backend',
+  version: '2.0.0',
   uptime: Math.floor(process.uptime()) + 's',
   services: {
+    supabase: !!(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY),
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     stripe: !!process.env.STRIPE_SECRET_KEY,
-    twilio: !!process.env.TWILIO_ACCOUNT_SID,
-  }
+    resend: !!process.env.RESEND_API_KEY,
+    cron_secret: !!process.env.CRON_SECRET,
+  },
 }));
 
 app.use((req, res) => res.status(404).json({ error: `Route ${req.method} ${req.path} introuvable.` }));
-app.use((err, req, res, next) => res.status(500).json({ error: err.message }));
+app.use((err, req, res, next) => {
+  logger.error(`Unhandled: ${err.message}`);
+  res.status(500).json({ error: err.message });
+});
 
 app.listen(PORT, () => {
-  logger.info(`🚀 MediFlow Backend — port ${PORT}`);
-  if (process.env.ANTHROPIC_API_KEY) startCronJobs();
-  else logger.warn('Cron jobs non démarrés — ANTHROPIC_API_KEY manquante');
+  logger.info(`🚀 Losaro Backend — port ${PORT}`);
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY) {
+    startCronJobs();
+  } else {
+    logger.warn('Cron jobs non démarrés — variables Supabase manquantes');
+  }
 });
 
 process.on('SIGTERM', () => {

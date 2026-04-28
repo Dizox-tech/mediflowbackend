@@ -1,36 +1,49 @@
 const express = require('express');
-const { createCabinet, getCabinetByEmail, updateCabinet } = require('../services/supabase');
+const { requireAuth } = require('../middleware/auth');
 const logger = require('../services/logger');
 
 const router = express.Router();
 
-router.post('/create', async (req, res) => {
-  const { email, nom, medecin, specialite, telephone, adresse, horaires } = req.body;
-  if (!email || !nom || !medecin) return res.status(400).json({ error: 'email, nom et medecin requis.' });
+// ════════════════════════════════════════════════════
+// /api/cabinets — gestion du cabinet (entreprise) courant
+// (les références "cabinet" sont conservées pour ne pas casser
+// le schéma BDD, mais sémantiquement il s'agit de l'entreprise.)
+// ════════════════════════════════════════════════════
+
+// GET /api/cabinets/me — récupère le cabinet du user authentifié
+router.get('/me', requireAuth, (req, res) => {
+  res.json({ cabinet: req.cabinet });
+});
+
+// PATCH /api/cabinets/me — met à jour son propre cabinet
+router.patch('/me', requireAuth, async (req, res) => {
+  const allowedFields = ['nom', 'entreprise', 'secteur', 'telephone', 'adresse', 'horaires', 'logo_url'];
+  const updates = {};
+  for (const f of allowedFields) {
+    if (req.body[f] !== undefined) updates[f] = req.body[f];
+  }
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Aucun champ à mettre à jour.' });
+
   try {
-    const existing = await getCabinetByEmail(email);
-    if (existing) return res.json({ cabinet: existing, created: false });
-    const cabinet = await createCabinet({ email, nom, medecin, specialite, telephone, adresse, horaires });
-    if (!cabinet) return res.status(500).json({ error: 'Erreur création cabinet.' });
-    logger.info(`Cabinet créé: ${email}`);
-    res.json({ cabinet, created: true });
+    const { data, error } = await req.supabase
+      .from('cabinets')
+      .update(updates)
+      .eq('id', req.cabinet.id)
+      .select()
+      .single();
+    if (error || !data) return res.status(500).json({ error: error?.message || 'Erreur mise à jour.' });
+    res.json({ cabinet: data });
   } catch (err) {
-    logger.error(`Cabinet create error: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
 
-router.get('/:id', async (req, res) => {
-  const { getCabinet } = require('../services/supabase');
-  const cabinet = await getCabinet(req.params.id);
-  if (!cabinet) return res.status(404).json({ error: 'Cabinet introuvable.' });
-  res.json({ cabinet });
-});
-
-router.patch('/:id', async (req, res) => {
-  const cabinet = await updateCabinet(req.params.id, req.body);
-  if (!cabinet) return res.status(500).json({ error: 'Erreur mise à jour.' });
-  res.json({ cabinet });
+// GET /api/cabinets/:id — admin only (pas implémenté pour l'instant)
+router.get('/:id', requireAuth, async (req, res) => {
+  if (req.cabinet.id !== req.params.id) {
+    return res.status(403).json({ error: 'Accès interdit.' });
+  }
+  res.json({ cabinet: req.cabinet });
 });
 
 module.exports = router;

@@ -1,30 +1,42 @@
 const cron = require('node-cron');
-const fetch = require('node-fetch');
 const logger = require('./logger');
+const { supabaseAdmin } = require('../middleware/auth');
+const { processRelancesAll } = require('./relances');
 
-const BASE_URL = `http://localhost:${process.env.PORT || 3001}`;
+// ════════════════════════════════════════════════════
+// Cron Losaro
+// 1. Tous les jours à 9h00 (heure Paris) → traite les relances impayés
+// 2. Tous les lundis à 8h00 → rapport hebdomadaire (pour plus tard)
+// ════════════════════════════════════════════════════
 
-const syncJob = cron.schedule('*/15 * * * *', async () => {
-  logger.info('⏰ Cron — Sync iCal + rappels');
-  try {
-    const res = await fetch(`${BASE_URL}/api/ical/rdvs?cabinetId=demo`);
-    const data = await res.json();
-    if (!data.connected || data.rdvs.length === 0) return;
-    await fetch(`${BASE_URL}/api/reminders/process`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rdvs: data.rdvs, settings: { sms48h: true, email24h: true } }),
-    });
-  } catch (err) {
-    logger.error(`Cron error: ${err.message}`);
+const dailyRelances = cron.schedule('0 9 * * *', async () => {
+  logger.info('⏰ Cron quotidien — process relances Losaro');
+  if (!supabaseAdmin) {
+    logger.error('Cron relances: supabaseAdmin non disponible');
+    return;
   }
-}, { scheduled: false });
+  try {
+    const res = await processRelancesAll(supabaseAdmin);
+    logger.info(`Cron quotidien terminé : ${res.processed} relance(s) envoyée(s)`);
+  } catch (err) {
+    logger.error(`Cron relances error: ${err.message}`);
+  }
+}, { scheduled: false, timezone: 'Europe/Paris' });
 
-const dailyReport = cron.schedule('0 9 * * *', () => {
-  logger.info('📊 Rapport quotidien');
-}, { scheduled: false });
+const weeklyReport = cron.schedule('0 8 * * 1', () => {
+  logger.info('📊 Cron hebdomadaire — rapport (placeholder)');
+  // TODO : envoyer un email récap aux dirigeants
+}, { scheduled: false, timezone: 'Europe/Paris' });
 
-const startCronJobs = () => { syncJob.start(); dailyReport.start(); logger.info('✅ Cron jobs démarrés'); };
-const stopCronJobs = () => { syncJob.stop(); dailyReport.stop(); };
+const startCronJobs = () => {
+  dailyRelances.start();
+  weeklyReport.start();
+  logger.info('✅ Cron jobs démarrés (relances 9h, rapport lundi 8h)');
+};
+
+const stopCronJobs = () => {
+  dailyRelances.stop();
+  weeklyReport.stop();
+};
 
 module.exports = { startCronJobs, stopCronJobs };
