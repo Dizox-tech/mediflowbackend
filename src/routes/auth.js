@@ -7,6 +7,53 @@ const router = express.Router();
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
+// ──────────────────────────────────────────────────
+// ensureCabinet — idempotent
+//   1. Cherche le cabinet par email
+//   2. S'il n'existe pas, le crée à la volée à partir du user.user_metadata
+//   3. Retourne { cabinet, error } — error non-null si échec d'INSERT
+//
+// Utilisé par /signup, /login et /me pour auto-réparer les comptes
+// orphelins (user créé sans cabinet, ex. ancienne erreur RLS silencieuse).
+// ──────────────────────────────────────────────────
+async function ensureCabinet(supabaseAdmin, user) {
+  if (!user || !user.email) return { cabinet: null, error: new Error('no user') };
+
+  // 1. Lookup
+  const { data: existing, error: lookupErr } = await supabaseAdmin
+    .from('cabinets')
+    .select('*')
+    .eq('email', user.email)
+    .maybeSingle();
+  if (lookupErr) {
+    logger.error(`ensureCabinet lookup error for ${user.email}: ${lookupErr.message}`);
+    return { cabinet: null, error: lookupErr };
+  }
+  if (existing) return { cabinet: existing, error: null };
+
+  // 2. Auto-create
+  const meta = user.user_metadata || {};
+  const { data: created, error: createErr } = await supabaseAdmin
+    .from('cabinets')
+    .insert([{
+      email: user.email,
+      nom: meta.nom || user.email,
+      entreprise: meta.entreprise || null,
+      secteur: meta.secteur || null,
+      plan: 'pro',
+      stripe_status: 'trial',
+      actif: true,
+    }])
+    .select()
+    .single();
+  if (createErr) {
+    logger.error(`ensureCabinet INSERT failed for ${user.email}: ${createErr.message} (code=${createErr.code || 'n/a'})`);
+    return { cabinet: null, error: createErr };
+  }
+  logger.info(`ensureCabinet created cabinet ${created.id} for ${user.email}`);
+  return { cabinet: created, error: null };
+}
+
 // ── Email de bienvenue ──
 async function sendWelcomeEmail(email, nom) {
   if (!resend) {
@@ -78,28 +125,18 @@ router.post('/signup', async (req, res) => {
     });
     if (error) return res.status(400).json({ error: error.message });
 
-    // 2. Création du cabinet Losaro (sans champs santé)
-    const { data: cabinet, error: cabinetErr } = await supabaseAdmin
-      .from('cabinets')
-      .insert([{
-        email,
-        nom: nom || email,
-        entreprise: entreprise || null,
-        secteur: secteur || null,
-        plan: 'pro',
-        stripe_status: 'trial',
-        actif: true,
-      }])
-      .select()
-      .single();
+    // 2. Création du cabinet Losaro (idempotent)
+    const { cabinet, error: cabinetErr } = await ensureCabinet(supabaseAdmin, data.user);
     if (cabinetErr) {
-      logger.error(`createCabinet error: ${cabinetErr.message}`);
+      // On laisse passer : le cabinet sera retenté au prochain /login ou /me.
+      // Mais on log clairement pour Render.
+      logger.warn(`Signup OK but cabinet not created for ${email}: ${cabinetErr.message}`);
     }
 
     // 3. Email de bienvenue (best-effort)
     sendWelcomeEmail(email, nom).catch(() => {});
 
-    logger.info(`Signup: ${email}`);
+    logger.info(`Signup: ${email} (cabinet=${cabinet ? cabinet.id : 'PENDING'})`);
     res.json({ user: data.user, cabinet });
   } catch (err) {
     logger.error(`Signup error: ${err.message}`);
@@ -117,11 +154,8 @@ router.post('/login', async (req, res) => {
     const { data, error } = await supabaseAdmin.auth.signInWithPassword({ email, password });
     if (error) return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
 
-    const { data: cabinet } = await supabaseAdmin
-      .from('cabinets')
-      .select('*')
-      .eq('email', email)
-      .single();
+    // Auto-répare les comptes orphelins (user sans cabinet)
+    const { cabinet } = await ensureCabinet(supabaseAdmin, data.user);
 
     logger.info(`Login: ${email}`);
     res.json({ user: data.user, session: data.session, cabinet });
@@ -144,11 +178,8 @@ router.get('/me', async (req, res) => {
     const { data, error } = await supabaseAdmin.auth.getUser(token);
     if (error || !data?.user) return res.status(401).json({ error: 'Token invalide.' });
 
-    const { data: cabinet } = await supabaseAdmin
-      .from('cabinets')
-      .select('*')
-      .eq('email', data.user.email)
-      .single();
+    // Auto-répare les comptes orphelins (user sans cabinet)
+    const { cabinet } = await ensureCabinet(supabaseAdmin, data.user);
 
     res.json({ user: data.user, cabinet });
   } catch (err) {

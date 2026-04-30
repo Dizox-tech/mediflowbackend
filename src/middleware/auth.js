@@ -3,9 +3,34 @@ const logger = require('../services/logger');
 const { rateLimit } = require('express-rate-limit');
 
 // ── Supabase admin client (service role, bypass RLS) ──
+// Important :
+//   - persistSession / autoRefreshToken=false → empêche que le client global
+//     soit "contaminé" par une session user après auth.admin.createUser()
+//   - global.headers.Authorization explicite → garantit le rôle service_role
+//     sur toutes les requêtes PostgREST (bypass RLS)
 const supabaseAdmin = process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
-  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY)
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+      global: {
+        headers: {
+          Authorization: `Bearer ${process.env.SUPABASE_SECRET_KEY}`,
+        },
+      },
+    })
   : null;
+
+if (process.env.SUPABASE_SECRET_KEY) {
+  const k = process.env.SUPABASE_SECRET_KEY;
+  let kind = 'unknown';
+  if (k.startsWith('sb_secret_')) kind = 'sb_secret (OK)';
+  else if (k.startsWith('sb_publishable_')) kind = 'sb_publishable (BAD - won\'t bypass RLS)';
+  else if (k.startsWith('eyJ')) kind = 'legacy JWT (check role inside)';
+  logger.info(`Supabase admin key kind: ${kind}`);
+}
 
 // ──────────────────────────────────────────────────
 // requireAuth — vérifie le Bearer token et injecte
