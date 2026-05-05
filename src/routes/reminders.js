@@ -35,6 +35,21 @@ router.post('/relances/send', requireAuth, async (req, res) => {
     if (error || !f) return res.status(404).json({ error: 'Facture introuvable.' });
     if (!f.client_email) return res.status(400).json({ error: 'Pas d\'email client sur cette facture.' });
 
+    // Garde-fous métier : pas de relance sur facture payée/annulée ni sur facture pas encore échue.
+    if (f.statut === 'paid' || f.statut === 'cancelled') {
+      return res.status(400).json({
+        error: `Facture déjà ${f.statut === 'paid' ? 'payée' : 'annulée'}, relance impossible.`
+      });
+    }
+    const daysLate = Math.floor(
+      (new Date() - new Date(f.date_echeance)) / (1000 * 60 * 60 * 24)
+    );
+    if (daysLate < 1) {
+      return res.status(400).json({
+        error: 'Facture pas encore échue, relance impossible.'
+      });
+    }
+
     const targetStage = stage || (() => {
       // Auto : prochaine étape selon le retard
       const now = new Date();
