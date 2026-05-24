@@ -129,8 +129,9 @@ async function processRelancesForCabinet(supabase, cabinet) {
     if (daysLate < RELANCE_SCHEDULE[0]) continue; // pas encore en retard
 
     const lastSent = f.last_stage_sent || 0;
-    const nextStage = RELANCE_SCHEDULE.find(s => s > lastSent && daysLate >= s);
-    if (!nextStage) continue;
+    const applicableStages = RELANCE_SCHEDULE.filter(s => s > lastSent && daysLate >= s);
+    if (applicableStages.length === 0) continue;
+    const nextStage = applicableStages[applicableStages.length - 1];
 
     const result = await sendRelanceEmail(nextStage, {
       clientName: f.client_nom || 'Client',
