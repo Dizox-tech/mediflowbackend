@@ -58,11 +58,19 @@ function getRelanceTemplate(stage, data) {
         ${foot}`
     },
     60: {
-      subject: `Dernier avertissement — Facture ${invoiceRef} — Recouvrement imminent`,
+      subject: `Dernier avertissement avant procédure — Facture ${invoiceRef}`,
       html: `${head}
         <p>Bonjour ${clientName || 'Madame, Monsieur'},</p>
-        <p>Ceci est notre dernier avertissement concernant la facture <strong>${invoiceRef}</strong> de <strong>${safeAmount} € TTC</strong>, impayée depuis 60 jours.</p>
-        <p>Sans règlement immédiat, nous engageons une procédure de recouvrement judiciaire sans autre préavis. Les frais de procédure seront à votre charge.</p>
+        <p>Malgré nos précédentes relances, la facture <strong>${invoiceRef}</strong> d'un montant de <strong>${safeAmount} € TTC</strong> reste impayée depuis <strong>60 jours</strong>.</p>
+        <p>Ceci constitue notre <strong>dernière relance amiable</strong>. À défaut de règlement intégral sous <strong>5 jours ouvrés</strong>, nous engagerons une procédure de recouvrement sans nouvel avis.</p>
+        <p>Dans ce cas, s'ajouteront à la somme due :</p>
+        <ul>
+          <li>Des <strong>intérêts de retard</strong> calculés depuis la date d'échéance</li>
+          <li>Une <strong>indemnité forfaitaire pour frais de recouvrement</strong> (le cas échéant)</li>
+          <li>L'ensemble des <strong>frais de procédure et honoraires d'huissier</strong>, à votre charge</li>
+        </ul>
+        <p>Pour éviter ces frais, merci de procéder au règlement immédiat.</p>
+        <p>Pour toute question : <a href="mailto:${contactEmail}">${contactEmail}</a></p>
         ${foot}`
     }
   };
