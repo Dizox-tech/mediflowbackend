@@ -51,11 +51,14 @@ router.post('/relances/send', requireAuth, async (req, res) => {
     }
 
     const targetStage = stage || (() => {
-      // Auto : prochaine étape selon le retard
+      // Auto : stage le plus avancé applicable selon le retard
       const now = new Date();
       const days = Math.floor((now - new Date(f.date_echeance)) / (1000 * 60 * 60 * 24));
       const lastSent = f.last_stage_sent || 0;
-      return RELANCE_SCHEDULE.find(s => s > lastSent && days >= s) || RELANCE_SCHEDULE[0];
+      const applicableStages = RELANCE_SCHEDULE.filter(s => s > lastSent && days >= s);
+      return applicableStages.length > 0
+        ? applicableStages[applicableStages.length - 1]
+        : RELANCE_SCHEDULE[0];
     })();
 
     const companyName = req.cabinet.entreprise || req.cabinet.nom || 'Losaro';
