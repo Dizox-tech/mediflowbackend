@@ -27,18 +27,20 @@ async function sendPaymentConfirmationEmail(email, nom, plan, amount) {
           <h1 style="font-size:1.3rem;font-weight:700;margin:1.5rem 0 0.5rem">Paiement confirmé</h1>
           <p style="color:#666;margin-bottom:1.5rem">Merci ${nom || ''}, votre abonnement est actif.</p>
           <div style="background:#f8f7f4;border-radius:12px;padding:1.5rem;margin-bottom:1.5rem">
-            <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem">
-              <span style="color:#666">Plan</span>
-              <strong>${plan}</strong>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem">
-              <span style="color:#666">Montant</span>
-              <strong>${amount}€ HT/mois</strong>
-            </div>
-            <div style="display:flex;justify-content:space-between">
-              <span style="color:#666">Statut</span>
-              <strong style="color:#22c55e">Actif</strong>
-            </div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+              <tr>
+                <td style="color:#666;padding-bottom:0.5rem">Plan</td>
+                <td style="text-align:right;font-weight:700;padding-bottom:0.5rem">${plan}</td>
+              </tr>
+              <tr>
+                <td style="color:#666;padding-bottom:0.5rem">Montant</td>
+                <td style="text-align:right;font-weight:700;padding-bottom:0.5rem">${amount}€ HT/mois</td>
+              </tr>
+              <tr>
+                <td style="color:#666">Statut</td>
+                <td style="text-align:right;font-weight:700;color:#22c55e">Actif</td>
+              </tr>
+            </table>
           </div>
           <a href="https://losaro.fr" style="display:inline-block;background:#0f0f0d;color:white;text-decoration:none;padding:0.85rem 2rem;border-radius:8px;font-weight:600;font-size:0.9rem;margin-bottom:2rem">
             Accéder à mon tableau de bord →
@@ -50,6 +52,43 @@ async function sendPaymentConfirmationEmail(email, nom, plan, amount) {
     });
     logger.info(`Email paiement confirmé → ${email}`);
   } catch (err) { logger.error(`Email paiement error: ${err.message}`); }
+}
+
+async function sendTrialStartedEmail(email, nom, trialEndDate) {
+  if (!resend) { logger.debug(`[EMAIL ESSAI SIMULÉ] → ${email}`); return; }
+  try {
+    await resend.emails.send({
+      from: 'Losaro <contact@losaro.fr>',
+      to: email,
+      subject: 'Bienvenue chez Losaro — votre essai gratuit a démarré',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:2rem;color:#1a1a17">
+          <strong style="font-size:1.3rem;letter-spacing:-0.03em">Losaro</strong>
+          <h1 style="font-size:1.3rem;font-weight:700;margin:1.5rem 0 0.5rem">Votre essai gratuit a démarré</h1>
+          <p style="color:#666;margin-bottom:1.5rem">Bienvenue ${nom || ''}, vous avez accès à toutes les fonctionnalités de Losaro pendant 30 jours.</p>
+          <div style="background:#f8f7f4;border-radius:12px;padding:1.5rem;margin-bottom:1.5rem">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+              <tr>
+                <td style="color:#666;padding-bottom:0.5rem">Essai gratuit</td>
+                <td style="text-align:right;font-weight:700;padding-bottom:0.5rem">30 jours</td>
+              </tr>
+              <tr>
+                <td style="color:#666">Premier prélèvement</td>
+                <td style="text-align:right;font-weight:700">${trialEndDate}</td>
+              </tr>
+            </table>
+          </div>
+          <p style="color:#666;margin-bottom:1.5rem">Aucun prélèvement ne sera effectué avant cette date. Vous pouvez annuler à tout moment depuis votre espace.</p>
+          <a href="https://losaro.fr" style="display:inline-block;background:#0f0f0d;color:white;text-decoration:none;padding:0.85rem 2rem;border-radius:8px;font-weight:600;font-size:0.9rem;margin-bottom:2rem">
+            Accéder à mon tableau de bord →
+          </a>
+          <hr style="border:none;border-top:1px solid #e8e6dd;margin:1.5rem 0">
+          <p style="font-size:0.75rem;color:#aaa">© 2026 Losaro · contact@losaro.fr</p>
+        </div>
+      `
+    });
+    logger.info(`Email essai démarré → ${email}`);
+  } catch (err) { logger.error(`Email essai error: ${err.message}`); }
 }
 
 async function sendCancellationEmail(email, nom, endDate) {
@@ -121,7 +160,7 @@ router.post('/create-checkout', stripeRateLimiter, async (req, res) => {
       payment_method_types: ['card'],
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
-      subscription_data: { trial_period_days: 14 },
+      subscription_data: { trial_period_days: 30 },
       success_url: `${process.env.STRIPE_SUCCESS_URL}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: process.env.STRIPE_CANCEL_URL,
       locale: 'fr',
@@ -152,16 +191,26 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   try {
     switch (event.type) {
 
-      // Paiement réussi
+      // Paiement réussi (ou démarrage d'essai à 0€)
       case 'invoice.payment_succeeded': {
         const invoice = event.data.object;
         const customer = await stripe.customers.retrieve(invoice.customer);
         const email = customer.email;
         const nom = customer.name || '';
         const plan = invoice.lines?.data?.[0]?.description || 'Pro';
-        const amount = (invoice.amount_paid / 100).toFixed(0);
-        await sendPaymentConfirmationEmail(email, nom, plan, amount);
-        logger.info(`Paiement confirmé: ${email} — ${amount}€`);
+        const amountPaid = invoice.amount_paid / 100;
+        if (amountPaid === 0) {
+          // Facture à 0€ = début de période d'essai, pas un vrai paiement
+          const periodEnd = invoice.lines?.data?.[0]?.period?.end;
+          const trialEndDate = periodEnd
+            ? new Date(periodEnd * 1000).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+            : 'la fin de votre essai';
+          await sendTrialStartedEmail(email, nom, trialEndDate);
+          logger.info(`Essai démarré: ${email}`);
+        } else {
+          await sendPaymentConfirmationEmail(email, nom, plan, amountPaid.toFixed(0));
+          logger.info(`Paiement confirmé: ${email} — ${amountPaid}€`);
+        }
         break;
       }
 
