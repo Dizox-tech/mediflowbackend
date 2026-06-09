@@ -13,6 +13,15 @@ const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KE
 
 const getPriceId = (plan, period) => process.env[`STRIPE_PRICE_${plan.toUpperCase()}_${period.toUpperCase()}`];
 
+// Portail client Stripe (gestion/résiliation self-service par le client)
+const PORTAL_URL = 'https://billing.stripe.com/p/login/cNi28q6STf8D4k56H263K00';
+
+// Nettoie le libellé brut Stripe ("1 × Losaro Starter (à €49.00/month)") → "Losaro Starter"
+const cleanPlanLabel = (desc) => (desc || '')
+  .replace(/^\d+\s*[x×]\s*/i, '')
+  .replace(/\s*\(.*\)\s*$/, '')
+  .trim() || 'votre abonnement';
+
 // ── Email helpers ──
 async function sendPaymentConfirmationEmail(email, nom, plan, amount) {
   if (!resend) { logger.debug(`[EMAIL PAIEMENT SIMULÉ] → ${email}`); return; }
@@ -46,7 +55,7 @@ async function sendPaymentConfirmationEmail(email, nom, plan, amount) {
             Accéder à mon tableau de bord →
           </a>
           <hr style="border:none;border-top:1px solid #e8e6dd;margin:1.5rem 0">
-          <p style="font-size:0.75rem;color:#aaa">© 2026 Losaro · contact@losaro.fr</p>
+          <p style="font-size:0.75rem;color:#aaa"><a href="${PORTAL_URL}" style="color:#aaa">Gérer mon abonnement</a> · © 2026 Losaro · contact@losaro.fr</p>
         </div>
       `
     });
@@ -78,12 +87,12 @@ async function sendTrialStartedEmail(email, nom, trialEndDate) {
               </tr>
             </table>
           </div>
-          <p style="color:#666;margin-bottom:1.5rem">Aucun prélèvement ne sera effectué avant cette date. Vous pouvez annuler à tout moment depuis votre espace.</p>
+          <p style="color:#666;margin-bottom:1.5rem">Aucun prélèvement ne sera effectué avant cette date, et c'est sans engagement : vous pouvez <a href="${PORTAL_URL}" style="color:#1a1a17">gérer ou résilier votre abonnement</a> en ligne à tout moment.</p>
           <a href="https://losaro.fr" style="display:inline-block;background:#0f0f0d;color:white;text-decoration:none;padding:0.85rem 2rem;border-radius:8px;font-weight:600;font-size:0.9rem;margin-bottom:2rem">
             Accéder à mon tableau de bord →
           </a>
           <hr style="border:none;border-top:1px solid #e8e6dd;margin:1.5rem 0">
-          <p style="font-size:0.75rem;color:#aaa">© 2026 Losaro · contact@losaro.fr</p>
+          <p style="font-size:0.75rem;color:#aaa"><a href="${PORTAL_URL}" style="color:#aaa">Gérer mon abonnement</a> · © 2026 Losaro · contact@losaro.fr</p>
         </div>
       `
     });
@@ -109,7 +118,7 @@ async function sendCancellationEmail(email, nom, endDate) {
             Me réabonner →
           </a>
           <hr style="border:none;border-top:1px solid #e8e6dd;margin:1.5rem 0">
-          <p style="font-size:0.75rem;color:#aaa">© 2026 Losaro · contact@losaro.fr</p>
+          <p style="font-size:0.75rem;color:#aaa"><a href="${PORTAL_URL}" style="color:#aaa">Gérer mon abonnement</a> · © 2026 Losaro · contact@losaro.fr</p>
         </div>
       `
     });
@@ -131,11 +140,11 @@ async function sendPaymentFailedEmail(email, nom) {
           <p style="color:#666;margin-bottom:1.5rem">Bonjour ${nom || ''},</p>
           <p>Nous n'avons pas pu prélever votre abonnement Losaro. Votre accès reste actif pendant 7 jours.</p>
           <p style="margin-top:1rem">Veuillez mettre à jour vos informations de paiement pour éviter toute interruption de service.</p>
-          <a href="https://losaro.fr" style="display:inline-block;background:#ef4444;color:white;text-decoration:none;padding:0.85rem 2rem;border-radius:8px;font-weight:600;font-size:0.9rem;margin:1.5rem 0">
+          <a href="${PORTAL_URL}" style="display:inline-block;background:#ef4444;color:white;text-decoration:none;padding:0.85rem 2rem;border-radius:8px;font-weight:600;font-size:0.9rem;margin:1.5rem 0">
             Mettre à jour mon moyen de paiement →
           </a>
           <hr style="border:none;border-top:1px solid #e8e6dd;margin:1.5rem 0">
-          <p style="font-size:0.75rem;color:#aaa">© 2026 Losaro · contact@losaro.fr</p>
+          <p style="font-size:0.75rem;color:#aaa"><a href="${PORTAL_URL}" style="color:#aaa">Gérer mon abonnement</a> · © 2026 Losaro · contact@losaro.fr</p>
         </div>
       `
     });
@@ -208,7 +217,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
           await sendTrialStartedEmail(email, nom, trialEndDate);
           logger.info(`Essai démarré: ${email}`);
         } else {
-          await sendPaymentConfirmationEmail(email, nom, plan, amountPaid.toFixed(0));
+          await sendPaymentConfirmationEmail(email, nom, cleanPlanLabel(plan), amountPaid.toFixed(0));
           logger.info(`Paiement confirmé: ${email} — ${amountPaid}€`);
         }
         break;
