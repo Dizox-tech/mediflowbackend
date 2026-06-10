@@ -131,6 +131,126 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/factures/import — import bulk clients + factures impayées (active les relances)
+// Body : { rows: [{ nom_client, email_client, reference_facture, montant, date_echeance }] }
+router.post('/import', requireAuth, async (req, res) => {
+  const { rows } = req.body;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: 'rows (array) requis.' });
+  }
+  if (rows.length > 2000) {
+    return res.status(400).json({ error: 'Maximum 2000 lignes par import.' });
+  }
+
+  // Parseurs tolérants (formats FR)
+  const parseDate = (s) => {
+    if (!s) return null;
+    const v = String(s).trim();
+    let m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    m = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+    if (m) {
+      let [, d, mo, y] = m;
+      if (y.length === 2) y = '20' + y;
+      return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+    return null;
+  };
+  const parseMontant = (s) => {
+    if (s === undefined || s === null || s === '') return NaN;
+    return parseFloat(String(s).replace(/\s/g, '').replace(',', '.').replace(/[^\d.-]/g, ''));
+  };
+
+  const errors = [];
+  const valid = [];
+  rows.forEach((r, i) => {
+    const ligne = i + 2; // ligne 1 = entête
+    const nom = (r.nom_client ?? r.nom ?? '').toString().trim();
+    const email = ((r.email_client ?? r.email ?? '').toString().trim()) || null;
+    const reference = ((r.reference_facture ?? r.reference ?? '').toString().trim()) || null;
+    const montant = parseMontant(r.montant ?? r.montant_ht);
+    const echeance = parseDate(r.date_echeance ?? r.echeance);
+    if (!nom) { errors.push(`Ligne ${ligne}: nom_client manquant`); return; }
+    if (isNaN(montant) || montant <= 0) { errors.push(`Ligne ${ligne}: montant invalide`); return; }
+    if (!echeance) { errors.push(`Ligne ${ligne}: date_echeance invalide`); return; }
+    valid.push({ nom, email, reference, montant, echeance });
+  });
+
+  if (valid.length === 0) {
+    return res.status(400).json({ error: 'Aucune ligne valide.', errors: errors.slice(0, 20) });
+  }
+
+  try {
+    const keyOf = (nom, email) => `${(nom || '').toLowerCase()}|${(email || '').toLowerCase()}`;
+
+    // 1) Clients existants → dédup
+    const { data: existing } = await req.supabase
+      .from('clients').select('id, nom, email').eq('cabinet_id', req.cabinet.id);
+    const clientMap = new Map();
+    (existing || []).forEach(c => clientMap.set(keyOf(c.nom, c.email), c));
+
+    // 2) Créer les nouveaux clients en bulk
+    const toCreate = new Map();
+    valid.forEach(v => {
+      const k = keyOf(v.nom, v.email);
+      if (!clientMap.has(k) && !toCreate.has(k)) {
+        toCreate.set(k, { cabinet_id: req.cabinet.id, nom: v.nom, email: v.email, telephone: null, entreprise: null });
+      }
+    });
+    let clientsCreated = 0;
+    if (toCreate.size > 0) {
+      const { data: created, error: cErr } = await req.supabase
+        .from('clients').insert([...toCreate.values()]).select('id, nom, email');
+      if (cErr) return res.status(500).json({ error: cErr.message });
+      created.forEach(c => clientMap.set(keyOf(c.nom, c.email), c));
+      clientsCreated = created.length;
+    }
+
+    // 3) Référence séquentielle calculée une fois (évite les doublons en bulk)
+    const year = new Date().getFullYear();
+    const { count: baseCount } = await req.supabase
+      .from('factures').select('id', { count: 'exact', head: true })
+      .eq('cabinet_id', req.cabinet.id).gte('created_at', `${year}-01-01`);
+    let seq = baseCount || 0;
+    const nextRef = () => { seq += 1; return `F-${year}-${String(seq).padStart(4, '0')}`; };
+
+    // 4) Construire et insérer les factures (statut pending → relances actives)
+    const factureRows = valid.map(v => {
+      const client = clientMap.get(keyOf(v.nom, v.email));
+      return {
+        cabinet_id: req.cabinet.id,
+        client_id: client?.id || null,
+        reference: v.reference || nextRef(),
+        montant: v.montant,
+        montant_ht: v.montant,
+        tva: 0,
+        description: 'Import CSV',
+        date_echeance: v.echeance,
+        date_emission: v.echeance,
+        statut: 'pending',
+        client_nom: v.nom,
+        client_email: v.email,
+        last_stage_sent: 0,
+      };
+    });
+
+    const { data: facts, error: fErr } = await req.supabase
+      .from('factures').insert(factureRows).select('id');
+    if (fErr) return res.status(500).json({ error: fErr.message });
+
+    logger.info(`Import: ${clientsCreated} clients + ${facts.length} factures (cabinet ${req.cabinet.id})`);
+    res.status(201).json({
+      clients_created: clientsCreated,
+      factures_created: facts.length,
+      skipped: errors.length,
+      errors: errors.slice(0, 20),
+    });
+  } catch (err) {
+    logger.error(`Import factures exception: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /api/factures/:id
 router.patch('/:id', requireAuth, async (req, res) => {
   const allowedFields = ['montant', 'montant_ht', 'tva', 'description', 'date_echeance', 'date_emission', 'statut', 'reference'];
