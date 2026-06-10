@@ -17,11 +17,21 @@ router.get('/me', requireAuth, (req, res) => {
 
 // PATCH /api/cabinets/me — met à jour son propre cabinet
 router.patch('/me', requireAuth, async (req, res) => {
-  const allowedFields = ['nom', 'entreprise', 'secteur', 'telephone', 'adresse', 'horaires', 'logo_url'];
+  const allowedFields = ['nom', 'entreprise', 'secteur', 'telephone', 'adresse', 'horaires', 'logo_url', 'tva_regime', 'tva_defaut'];
   const updates = {};
   for (const f of allowedFields) {
     if (req.body[f] !== undefined) updates[f] = req.body[f];
   }
+  // Validation TVA
+  if (updates.tva_regime !== undefined && !['franchise', 'assujetti'].includes(updates.tva_regime)) {
+    return res.status(400).json({ error: 'tva_regime invalide.' });
+  }
+  if (updates.tva_defaut !== undefined) {
+    const t = parseFloat(updates.tva_defaut);
+    if (isNaN(t) || t < 0 || t > 100) return res.status(400).json({ error: 'tva_defaut invalide.' });
+    updates.tva_defaut = t;
+  }
+  if (updates.tva_regime === 'franchise') updates.tva_defaut = 0;
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Aucun champ à mettre à jour.' });
 
   try {
