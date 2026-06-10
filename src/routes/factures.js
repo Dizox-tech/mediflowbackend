@@ -167,13 +167,15 @@ router.post('/import', requireAuth, async (req, res) => {
     const ligne = i + 2; // ligne 1 = entête
     const nom = (r.nom_client ?? r.nom ?? '').toString().trim();
     const email = ((r.email_client ?? r.email ?? '').toString().trim()) || null;
+    const telephone = ((r.telephone ?? r.tel ?? '').toString().trim()) || null;
+    const entreprise = ((r.entreprise ?? r.societe ?? '').toString().trim()) || null;
     const reference = ((r.reference_facture ?? r.reference ?? '').toString().trim()) || null;
     const montant = parseMontant(r.montant ?? r.montant_ht);
     const echeance = parseDate(r.date_echeance ?? r.echeance);
     if (!nom) { errors.push(`Ligne ${ligne}: nom_client manquant`); return; }
     if (isNaN(montant) || montant <= 0) { errors.push(`Ligne ${ligne}: montant invalide`); return; }
     if (!echeance) { errors.push(`Ligne ${ligne}: date_echeance invalide`); return; }
-    valid.push({ nom, email, reference, montant, echeance });
+    valid.push({ nom, email, telephone, entreprise, reference, montant, echeance });
   });
 
   if (valid.length === 0) {
@@ -194,7 +196,7 @@ router.post('/import', requireAuth, async (req, res) => {
     valid.forEach(v => {
       const k = keyOf(v.nom, v.email);
       if (!clientMap.has(k) && !toCreate.has(k)) {
-        toCreate.set(k, { cabinet_id: req.cabinet.id, nom: v.nom, email: v.email, telephone: null, entreprise: null });
+        toCreate.set(k, { cabinet_id: req.cabinet.id, nom: v.nom, email: v.email, telephone: v.telephone, entreprise: v.entreprise });
       }
     });
     let clientsCreated = 0;
