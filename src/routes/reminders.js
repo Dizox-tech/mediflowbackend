@@ -69,6 +69,7 @@ router.post('/relances/send', requireAuth, async (req, res) => {
       invoiceRef: f.reference,
       companyName,
       contactEmail: req.cabinet.email || 'contact@losaro.fr',
+      tvaRegime: req.cabinet.tva_regime,
     });
 
     if (result.success) {
