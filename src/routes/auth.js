@@ -268,6 +268,37 @@ router.post('/reset-password', resetRateLimiter, async (req, res) => {
   }
 });
 
+// POST /api/auth/refresh { refresh_token } — renouvelle la session avant que le
+// jeton d'accès (1 h) expire, pour ne pas déconnecter l'utilisateur en plein travail
+const refreshRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.post('/refresh', refreshRateLimiter, async (req, res) => {
+  const { refresh_token } = req.body;
+  if (!refresh_token) return res.status(400).json({ error: 'refresh_token requis.' });
+  if (!supabaseAdmin) return res.status(503).json({ error: 'Auth non disponible.' });
+
+  try {
+    // Client jetable : refreshSession ouvre une session, elle ne doit pas toucher le client admin partagé
+    const refresher = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const { data, error } = await refresher.auth.refreshSession({ refresh_token });
+    if (error || !data?.session) {
+      return res.status(401).json({ error: 'Session expirée. Reconnectez-vous.' });
+    }
+    res.json({ user: data.user, session: data.session });
+  } catch (err) {
+    logger.error(`Refresh error: ${err.message}`);
+    res.status(500).json({ error: 'Erreur serveur, réessayez dans un instant.' });
+  }
+});
+
 // POST /api/auth/logout (no-op côté serveur, le client doit jeter le token)
 router.post('/logout', async (req, res) => {
   res.json({ success: true });
