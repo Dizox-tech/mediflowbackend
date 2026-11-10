@@ -26,54 +26,64 @@ function getRelanceTemplate(stage, data) {
     <p style="font-size:0.75rem;color:#aaa">Email automatique envoyé par Losaro · contact : ${contactEmail}</p>
   </div>`;
 
+  const bonjour = `<p>Bonjour ${clientName || 'Madame, Monsieur'},</p>`;
+  const contact = `<p>Pour toute question : <a href="mailto:${contactEmail}">${contactEmail}</a></p>`;
+  // Mentions légales entre professionnels (art. L441-10 du Code de commerce)
+  const penalites = `<p style="font-size:0.85rem;color:#555">Tout retard de paiement entraîne de plein droit des pénalités de retard ainsi qu'une indemnité forfaitaire de 40 € pour frais de recouvrement (article L441-10 du Code de commerce).</p>`;
+
+  // Le ton monte palier par palier : un oubli à J+7, une mise en demeure formelle à J+45, un dernier avis à J+60.
   const templates = {
     7: {
-      subject: `Rappel — Facture ${invoiceRef} en attente de règlement`,
+      subject: `Petit rappel : facture ${invoiceRef}`,
       html: `${head}
-        <p>Bonjour ${clientName || 'Madame, Monsieur'},</p>
-        <p>Nous vous contactons concernant notre facture <strong>${invoiceRef}</strong> d'un montant de <strong>${amountTxt}</strong>, dont l'échéance est dépassée de 7 jours.</p>
-        <p>Si vous avez déjà procédé au règlement, merci de ne pas tenir compte de ce message. Dans le cas contraire, nous vous remercions de bien vouloir régulariser la situation rapidement.</p>
-        <p>Pour toute question : <a href="mailto:${contactEmail}">${contactEmail}</a></p>
+        ${bonjour}
+        <p>Sauf erreur de notre part, la facture <strong>${invoiceRef}</strong> d'un montant de <strong>${amountTxt}</strong> est arrivée à échéance il y a 7 jours et n'a pas encore été réglée.</p>
+        <p>C'est sans doute un simple oubli. Si le paiement est déjà parti, merci de ne pas tenir compte de ce message. Si vous avez besoin d'un nouvel exemplaire de la facture, il suffit de répondre à ce mail.</p>
         ${foot}`
     },
     15: {
-      subject: `2ᵉ rappel — Facture ${invoiceRef} — Règlement urgent`,
+      subject: `Facture ${invoiceRef} toujours en attente de règlement`,
       html: `${head}
-        <p>Bonjour ${clientName || 'Madame, Monsieur'},</p>
-        <p>Sauf erreur de notre part, nous n'avons pas reçu le règlement de notre facture <strong>${invoiceRef}</strong> de <strong>${amountTxt}</strong>, désormais en retard de 15 jours.</p>
-        <p>Merci de procéder au règlement dans les 48 heures. Sans réponse, nous appliquerons les pénalités de retard prévues dans nos CGV.</p>
+        ${bonjour}
+        <p>Nous revenons vers vous au sujet de la facture <strong>${invoiceRef}</strong> de <strong>${amountTxt}</strong>, dont l'échéance est dépassée de 15 jours.</p>
+        <p>Pourriez-vous nous indiquer la date à laquelle le règlement est prévu ? Si un point de la facture pose question, dites-le-nous, nous le réglerons rapidement ensemble.</p>
+        ${contact}
         ${foot}`
     },
     30: {
-      subject: `URGENT — Facture ${invoiceRef} impayée — ${safeAmount} €`,
+      subject: `Facture ${invoiceRef} : 30 jours de retard`,
       html: `${head}
-        <p>Bonjour ${clientName || 'Madame, Monsieur'},</p>
-        <p>Malgré nos précédentes relances, la facture <strong>${invoiceRef}</strong> de <strong>${amountTxt}</strong> reste impayée depuis 30 jours.</p>
-        <p>Nous vous mettons en demeure de régler cette somme dans un délai de 8 jours. Sans règlement, nous engagerons une procédure de recouvrement.</p>
+        ${bonjour}
+        <p>Malgré nos deux précédents rappels, la facture <strong>${invoiceRef}</strong> de <strong>${amountTxt}</strong> reste impayée, 30 jours après son échéance.</p>
+        <p>Nous vous demandons de procéder au règlement sous <strong>8 jours</strong>. Passé ce délai, nous serons contraints d'appliquer les pénalités prévues par la loi et nos conditions de vente.</p>
+        ${penalites}
+        ${contact}
         ${foot}`
     },
     45: {
-      subject: `Mise en demeure — Facture ${invoiceRef} — Action requise`,
+      subject: `Mise en demeure de payer : facture ${invoiceRef}`,
       html: `${head}
-        <p>Bonjour ${clientName || 'Madame, Monsieur'},</p>
-        <p>La facture <strong>${invoiceRef}</strong> de <strong>${amountTxt}</strong> est impayée depuis 45 jours. Nos tentatives de règlement amiable sont restées sans suite.</p>
-        <p>Sans règlement dans les 5 jours ouvrés, ce dossier sera transmis à notre service contentieux pour recouvrement judiciaire.</p>
+        ${bonjour}
+        <p>La facture <strong>${invoiceRef}</strong> de <strong>${amountTxt}</strong> est impayée depuis 45 jours, et nos relances amiables sont restées sans réponse.</p>
+        <p>Par le présent message, nous vous <strong>mettons en demeure</strong> de régler cette somme sous <strong>8 jours</strong> à compter de sa réception.</p>
+        <p>À défaut, nous engagerons une procédure de recouvrement judiciaire, notamment par voie d'injonction de payer.</p>
+        ${penalites}
+        ${contact}
         ${foot}`
     },
     60: {
-      subject: `Dernier avertissement avant procédure — Facture ${invoiceRef}`,
+      subject: `Dernier avis avant procédure : facture ${invoiceRef}`,
       html: `${head}
-        <p>Bonjour ${clientName || 'Madame, Monsieur'},</p>
-        <p>Malgré nos précédentes relances, la facture <strong>${invoiceRef}</strong> d'un montant de <strong>${amountTxt}</strong> reste impayée depuis <strong>60 jours</strong>.</p>
-        <p>Ceci constitue notre <strong>dernière relance amiable</strong>. À défaut de règlement intégral sous <strong>5 jours ouvrés</strong>, nous engagerons une procédure de recouvrement sans nouvel avis.</p>
-        <p>Dans ce cas, s'ajouteront à la somme due :</p>
+        ${bonjour}
+        <p>Malgré notre mise en demeure, la facture <strong>${invoiceRef}</strong> d'un montant de <strong>${amountTxt}</strong> reste impayée depuis <strong>60 jours</strong>.</p>
+        <p>Ce message est notre <strong>dernier avis amiable</strong>. À défaut de règlement intégral sous <strong>5 jours ouvrés</strong>, nous saisirons le tribunal compétent sans nouvel avis.</p>
+        <p>La somme réclamée sera alors augmentée :</p>
         <ul>
-          <li>Des <strong>intérêts de retard</strong> calculés depuis la date d'échéance</li>
-          <li>Une <strong>indemnité forfaitaire pour frais de recouvrement</strong> (le cas échéant)</li>
-          <li>L'ensemble des <strong>frais de procédure et honoraires d'huissier</strong>, à votre charge</li>
+          <li>des <strong>pénalités de retard</strong>, calculées depuis la date d'échéance ;</li>
+          <li>de l'<strong>indemnité forfaitaire de 40 €</strong> pour frais de recouvrement (article L441-10 du Code de commerce).</li>
         </ul>
-        <p>Pour éviter ces frais, merci de procéder au règlement immédiat.</p>
-        <p>Pour toute question : <a href="mailto:${contactEmail}">${contactEmail}</a></p>
+        <p>Pour éviter cette procédure, merci de procéder au règlement dès maintenant, ou de nous contacter pour en convenir.</p>
+        ${contact}
         ${foot}`
     }
   };
@@ -137,7 +147,7 @@ async function processRelancesForCabinet(supabase, cabinet) {
     const nextStage = applicableStages[applicableStages.length - 1];
 
     const result = await sendRelanceEmail(nextStage, {
-      clientName: f.client_nom || 'Client',
+      clientName: f.client_nom, // vide : le mail commence par « Madame, Monsieur »
       clientEmail: f.client_email,
       amount: f.montant,
       invoiceRef: f.reference,

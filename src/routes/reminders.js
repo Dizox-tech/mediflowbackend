@@ -63,7 +63,7 @@ router.post('/relances/send', requireAuth, async (req, res) => {
 
     const companyName = req.cabinet.entreprise || req.cabinet.nom || 'Losaro';
     const result = await sendRelanceEmail(targetStage, {
-      clientName: f.client_nom || 'Client',
+      clientName: f.client_nom, // vide : le mail commence par « Madame, Monsieur »
       clientEmail: f.client_email,
       amount: f.montant,
       invoiceRef: f.reference,
