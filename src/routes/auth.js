@@ -1,4 +1,6 @@
 const express = require('express');
+const { createClient } = require('@supabase/supabase-js');
+const { rateLimit } = require('express-rate-limit');
 const { supabaseAdmin } = require('../middleware/auth');
 const logger = require('../services/logger');
 const { Resend } = require('resend');
@@ -162,6 +164,107 @@ router.post('/login', async (req, res) => {
   } catch (err) {
     logger.error(`Login error: ${err.message}`);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ──────────────────────────────────────────────────
+// Mot de passe oublié
+//   1. /forgot-password : génère un lien de récupération Supabase et l'envoie
+//      par Resend (mail Losaro en français, pas le modèle anglais de Supabase)
+//   2. /reset-password : vérifie le token du lien et enregistre le nouveau mot de passe
+// ──────────────────────────────────────────────────
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://www.losaro.fr';
+
+// Deux compteurs séparés : demander le lien et choisir le mot de passe ne
+// doivent pas se partager le même quota
+const forgotRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Trop de demandes. Réessayez dans 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+const resetRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+async function sendResetEmail(email, link) {
+  if (!resend) {
+    logger.debug(`[EMAIL RESET SIMULÉ] → ${email} | ${link}`);
+    return;
+  }
+  await resend.emails.send({
+    from: 'Losaro <contact@losaro.fr>',
+    to: email,
+    subject: 'Réinitialisez votre mot de passe Losaro',
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:2rem;color:#1a1a17">
+        <div style="margin-bottom:2rem"><strong style="font-size:1.3rem;letter-spacing:-0.03em">Losaro</strong></div>
+        <h1 style="font-size:1.3rem;font-weight:700;letter-spacing:-0.03em;margin-bottom:0.5rem">Réinitialiser votre mot de passe</h1>
+        <p style="color:#555;line-height:1.6">Vous avez demandé à changer le mot de passe de votre compte Losaro. Cliquez sur le bouton ci-dessous pour en choisir un nouveau. Le lien est valable <strong>1 heure</strong>.</p>
+        <a href="${link}" style="display:inline-block;background:#0f0f0d;color:white;text-decoration:none;padding:0.85rem 2rem;border-radius:8px;font-weight:600;font-size:0.9rem;margin:1.2rem 0 1.5rem">
+          Choisir un nouveau mot de passe
+        </a>
+        <p style="color:#888;font-size:0.82rem;line-height:1.6">Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe actuel reste valable.</p>
+        <hr style="border:none;border-top:1px solid #e8e6dd;margin:1.5rem 0">
+        <p style="font-size:0.75rem;color:#aaa">© 2026 Losaro · 55 rue Henri Barbusse, 77124 Crégy-lès-Meaux · SIRET 999 382 971 00011</p>
+      </div>
+    `,
+  });
+}
+
+// POST /api/auth/forgot-password — répond toujours pareil, pour ne pas révéler
+// si un compte existe pour cet email
+router.post('/forgot-password', forgotRateLimiter, async (req, res) => {
+  const email = (req.body.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Email requis.' });
+  if (!supabaseAdmin) return res.status(503).json({ error: 'Auth non disponible.' });
+
+  try {
+    const { data, error } = await supabaseAdmin.auth.admin.generateLink({ type: 'recovery', email });
+    if (error || !data?.properties?.hashed_token) {
+      // Compte inexistant le plus souvent : on ne le dit pas au visiteur
+      logger.info(`Forgot password: pas de lien pour ${email} (${error?.message || 'no token'})`);
+    } else {
+      const link = `${FRONTEND_URL}/reset?token_hash=${encodeURIComponent(data.properties.hashed_token)}`;
+      await sendResetEmail(email, link);
+      logger.info(`Forgot password: lien envoyé → ${email}`);
+    }
+  } catch (err) {
+    logger.error(`Forgot password error: ${err.message}`);
+  }
+  res.json({ success: true });
+});
+
+// POST /api/auth/reset-password { token_hash, password }
+router.post('/reset-password', resetRateLimiter, async (req, res) => {
+  const { token_hash, password } = req.body;
+  if (!token_hash || !password) return res.status(400).json({ error: 'Lien ou mot de passe manquant.' });
+  if (password.length < 8) return res.status(400).json({ error: 'Le mot de passe doit faire au moins 8 caractères.' });
+  if (!supabaseAdmin) return res.status(503).json({ error: 'Auth non disponible.' });
+
+  try {
+    // Client jetable : verifyOtp ouvre une session, elle ne doit pas toucher le client admin partagé
+    const verifier = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const { data, error } = await verifier.auth.verifyOtp({ type: 'recovery', token_hash });
+    if (error || !data?.user) {
+      return res.status(400).json({ error: 'Ce lien a expiré ou a déjà servi. Demandez-en un nouveau.' });
+    }
+
+    const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(data.user.id, { password });
+    if (updateErr) return res.status(400).json({ error: updateErr.message });
+
+    logger.info(`Reset password OK: ${data.user.email}`);
+    res.json({ success: true, email: data.user.email });
+  } catch (err) {
+    logger.error(`Reset password error: ${err.message}`);
+    res.status(500).json({ error: 'Erreur serveur, réessayez dans un instant.' });
   }
 });
 

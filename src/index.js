@@ -9,6 +9,10 @@ const { startCronJobs } = require('./services/cron');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Render place un proxy devant l'app : sans ça, tous les visiteurs ont la même IP
+// et partagent les mêmes compteurs anti-abus
+app.set('trust proxy', 1);
+
 app.use(helmet({ crossOriginEmbedderPolicy: false }));
 
 const allowedOrigins = [
