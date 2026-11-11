@@ -12,8 +12,22 @@ const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KE
 
 const RELANCE_SCHEDULE = [7, 15, 30, 45, 60];
 
+// Les noms viennent de la saisie des utilisateurs : on les échappe avant de les mettre dans le HTML
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// IBAN affiché par groupes de 4 : FR76 3000 6000 0112 3456 7890 189
+function formatIban(iban) {
+  return String(iban || '').replace(/\s+/g, '').toUpperCase().replace(/(.{4})/g, '$1 ').trim();
+}
+
 function getRelanceTemplate(stage, data) {
-  const { clientName, amount, invoiceRef, companyName, contactEmail, tvaRegime, lastStageSent } = data;
+  const { amount, tvaRegime, lastStageSent } = data;
+  const clientName = data.clientName ? esc(data.clientName) : '';
+  const invoiceRef = esc(data.invoiceRef);
+  const companyName = esc(data.companyName);
+  const contactEmail = esc(data.contactEmail);
   const value = typeof amount === 'number' ? amount : parseFloat(amount || 0);
   // Format français : 2 880,00 € (espace insécable, pour que le montant ne se coupe pas en fin de ligne)
   const safeAmount = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -27,6 +41,33 @@ function getRelanceTemplate(stage, data) {
   // Ne pas citer des rappels qui ne sont jamais partis (facture ajoutée déjà en retard)
   const dejaRelance = (lastStageSent || 0) > 0;
   const miseEnDemeureFaite = (lastStageSent || 0) >= 45;
+
+  // Récapitulatif lisible en deux secondes : numéro, montant, échéance, retard en rouge
+  const echeance = data.dateEcheance ? new Date(data.dateEcheance) : null;
+  const echeanceTxt = echeance && !isNaN(echeance)
+    ? echeance.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Paris' })
+    : null;
+  const ligne = (label, valeur, rouge) => `<tr>
+      <td style="padding:6px 0;color:#6b6b63;font-size:14px">${label}</td>
+      <td style="padding:6px 0;text-align:right;font-size:14px;font-weight:700;color:${rouge ? '#c2410c' : '#1a1a17'}">${valeur}</td>
+    </tr>`;
+  const recap = `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f6f5f1;border-radius:10px;padding:14px 18px;margin:18px 0;border-collapse:separate">
+    ${ligne('Facture', invoiceRef)}
+    ${ligne('Montant', amountTxt)}
+    ${echeanceTxt ? ligne('Échéance', echeanceTxt) : ''}
+    ${ligne('Retard', joursTxt, true)}
+  </table>`;
+
+  // Coordonnées de virement de l'agence, si elle les a renseignées : le client paie sans chercher la facture
+  const paiement = data.iban ? `<div style="border:1px solid #e3e1d8;border-radius:10px;padding:14px 18px;margin:18px 0">
+    <p style="margin:0 0 8px;font-weight:700;font-size:14px">Régler par virement</p>
+    <p style="margin:0;font-size:14px;line-height:1.7">
+      ${data.ibanTitulaire ? `Bénéficiaire : <strong>${esc(data.ibanTitulaire)}</strong><br>` : ''}
+      IBAN : <strong style="font-family:monospace;font-size:14px">${esc(formatIban(data.iban))}</strong><br>
+      ${data.bic ? `BIC : <strong style="font-family:monospace">${esc(String(data.bic).toUpperCase())}</strong><br>` : ''}
+      Référence à indiquer : <strong>${invoiceRef}</strong>
+    </p>
+  </div>` : '';
 
   const head = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:2rem;color:#1a1a17">
     <p style="font-weight:700;font-size:1.1rem;margin-bottom:1.5rem">${companyName}</p>`;
@@ -48,7 +89,9 @@ function getRelanceTemplate(stage, data) {
       html: `${head}
         ${bonjour}
         <p>Sauf erreur de notre part, la facture <strong>${invoiceRef}</strong> d'un montant de <strong>${amountTxt}</strong> est arrivée à échéance il y a ${joursTxt} et n'a pas encore été réglée.</p>
+        ${recap}
         <p>C'est sans doute un simple oubli. Si le paiement est déjà parti, merci de ne pas tenir compte de ce message. Si vous avez besoin d'un nouvel exemplaire de la facture, il suffit de répondre à ce mail.</p>
+        ${paiement}
         ${foot}`
     },
     15: {
@@ -56,7 +99,9 @@ function getRelanceTemplate(stage, data) {
       html: `${head}
         ${bonjour}
         <p>Nous revenons vers vous au sujet de la facture <strong>${invoiceRef}</strong> de <strong>${amountTxt}</strong>, dont l'échéance est dépassée de ${joursTxt}.</p>
+        ${recap}
         <p>Pourriez-vous nous indiquer la date à laquelle le règlement est prévu ? Si un point de la facture pose question, dites-le-nous, nous le réglerons rapidement ensemble.</p>
+        ${paiement}
         ${contact}
         ${foot}`
     },
@@ -65,7 +110,9 @@ function getRelanceTemplate(stage, data) {
       html: `${head}
         ${bonjour}
         <p>${dejaRelance ? 'Malgré nos précédents rappels, la' : 'La'} facture <strong>${invoiceRef}</strong> de <strong>${amountTxt}</strong> reste impayée, ${joursTxt} après son échéance.</p>
+        ${recap}
         <p>Nous vous demandons de procéder au règlement sous <strong>8 jours</strong>. Passé ce délai, nous serons contraints d'appliquer les pénalités prévues par la loi et nos conditions de vente.</p>
+        ${paiement}
         ${penalites}
         ${contact}
         ${foot}`
@@ -75,8 +122,10 @@ function getRelanceTemplate(stage, data) {
       html: `${head}
         ${bonjour}
         <p>La facture <strong>${invoiceRef}</strong> de <strong>${amountTxt}</strong> est impayée depuis ${joursTxt}${dejaRelance ? ', et nos relances amiables sont restées sans réponse' : ''}.</p>
+        ${recap}
         <p>Par le présent message, nous vous <strong>mettons en demeure</strong> de régler cette somme sous <strong>8 jours</strong> à compter de sa réception.</p>
         <p>À défaut, nous engagerons une procédure de recouvrement judiciaire, notamment par voie d'injonction de payer.</p>
+        ${paiement}
         ${penalites}
         ${contact}
         ${foot}`
@@ -86,6 +135,7 @@ function getRelanceTemplate(stage, data) {
       html: `${head}
         ${bonjour}
         <p>${miseEnDemeureFaite ? 'Malgré notre mise en demeure, la' : 'La'} facture <strong>${invoiceRef}</strong> d'un montant de <strong>${amountTxt}</strong> reste impayée depuis <strong>${joursTxt}</strong>.</p>
+        ${recap}
         <p>Ce message est notre <strong>dernier avis amiable</strong>. À défaut de règlement intégral sous <strong>5 jours ouvrés</strong>, nous saisirons le tribunal compétent sans nouvel avis.</p>
         <p>La somme réclamée sera alors augmentée :</p>
         <ul>
@@ -93,6 +143,7 @@ function getRelanceTemplate(stage, data) {
           <li>de l'<strong>indemnité forfaitaire de 40 €</strong> pour frais de recouvrement (article L441-10 du Code de commerce).</li>
         </ul>
         <p>Pour éviter cette procédure, merci de procéder au règlement dès maintenant, ou de nous contacter pour en convenir.</p>
+        ${paiement}
         ${contact}
         ${foot}`
     }
@@ -169,6 +220,10 @@ async function processRelancesForCabinet(supabase, cabinet) {
       companyName,
       contactEmail,
       tvaRegime: cabinet.tva_regime,
+      dateEcheance: f.date_echeance,
+      iban: cabinet.iban,
+      bic: cabinet.bic,
+      ibanTitulaire: cabinet.iban_titulaire,
       daysLate,
       lastStageSent: lastSent,
     });

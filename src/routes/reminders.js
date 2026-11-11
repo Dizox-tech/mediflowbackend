@@ -4,6 +4,7 @@ const { requireAuth } = require('../middleware/auth');
 const {
   RELANCE_SCHEDULE,
   sendRelanceEmail,
+  getRelanceTemplate,
   processRelancesForCabinet,
   processRelancesAll,
 } = require('../services/relances');
@@ -14,6 +15,46 @@ const router = express.Router();
 // /api/reminders — Système de relances Losaro
 // (les anciens endpoints de rappels RDV ont été supprimés)
 // ════════════════════════════════════════════════════
+
+// GET /api/reminders/relances/preview — les 5 relances exactement telles qu'elles partiront,
+// avec les coordonnées de l'agence. Sur une vraie facture si facture_id est fourni, sinon sur un exemple.
+router.get('/relances/preview', requireAuth, async (req, res) => {
+  try {
+    let f = null;
+    if (req.query.facture_id) {
+      const { data } = await req.supabase
+        .from('factures')
+        .select('*')
+        .eq('id', req.query.facture_id)
+        .eq('cabinet_id', req.cabinet.id)
+        .single();
+      f = data || null;
+    }
+    const c = req.cabinet;
+    const previews = RELANCE_SCHEDULE.map((stage, i) => {
+      // Chaque relance est montrée le jour où elle part, après les précédentes de la séquence
+      const echeance = new Date(Date.now() - stage * 24 * 60 * 60 * 1000);
+      const t = getRelanceTemplate(stage, {
+        clientName: f ? f.client_nom : 'Agence Exemple',
+        amount: f ? f.montant : 1500,
+        invoiceRef: f ? f.reference : 'FAC-2026-001',
+        companyName: c.entreprise || c.nom || 'Votre agence',
+        contactEmail: c.email || 'contact@losaro.fr',
+        tvaRegime: c.tva_regime,
+        dateEcheance: f ? f.date_echeance : echeance.toISOString().slice(0, 10),
+        iban: c.iban,
+        bic: c.bic,
+        ibanTitulaire: c.iban_titulaire,
+        daysLate: stage,
+        lastStageSent: i > 0 ? RELANCE_SCHEDULE[i - 1] : 0,
+      });
+      return { stage, subject: t.subject, html: t.html };
+    });
+    res.json({ previews, exemple: !f, iban: !!c.iban });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /api/reminders/relances/schedule — calendrier de relances
 router.get('/relances/schedule', (req, res) => {
@@ -70,6 +111,10 @@ router.post('/relances/send', requireAuth, async (req, res) => {
       companyName,
       contactEmail: req.cabinet.email || 'contact@losaro.fr',
       tvaRegime: req.cabinet.tva_regime,
+      dateEcheance: f.date_echeance,
+      iban: req.cabinet.iban,
+      bic: req.cabinet.bic,
+      ibanTitulaire: req.cabinet.iban_titulaire,
       daysLate,
       lastStageSent: f.last_stage_sent || 0,
     });
