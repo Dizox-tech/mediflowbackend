@@ -104,8 +104,13 @@ async function sendRelanceEmail(stage, data) {
       html: template.html,
       reply_to: data.contactEmail || 'contact@losaro.fr',
     });
+    // Le SDK Resend (v6) ne lève pas d'exception en cas de refus : il renvoie { data, error }
+    if (result.error) {
+      logger.error(`Resend a refusé la relance J+${stage} → ${data.clientEmail} : ${result.error.message}`);
+      return { success: false, error: result.error.message };
+    }
     logger.info(`Relance J+${stage} envoyée → ${data.clientEmail} | ${data.invoiceRef}`);
-    return { success: true, id: result.id };
+    return { success: true, id: result.data?.id };
   } catch (err) {
     logger.error(`Resend error: ${err.message}`);
     return { success: false, error: err.message };
