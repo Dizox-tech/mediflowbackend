@@ -24,9 +24,15 @@ const allowedOrigins = [
   'https://losaro-frontend.vercel.app',
 ].filter(Boolean);
 
-// CORS — pour l'instant on garde origin: true le temps de stabiliser, à resserrer plus tard
+// CORS : seuls le site Losaro et ses aperçus Vercel peuvent appeler l'API depuis un navigateur.
+// Les appels sans en-tête Origin (cron-job.org, webhook Stripe, curl) ne sont pas concernés.
+const vercelPreview = /^https:\/\/losaro-frontend(-[a-z0-9-]+)?\.vercel\.app$/;
 app.use(cors({
-  origin: true,
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes(origin) || vercelPreview.test(origin)) return cb(null, true);
+    logger.warn(`CORS refusé : ${origin}`);
+    cb(null, false);
+  },
   credentials: true,
 }));
 
