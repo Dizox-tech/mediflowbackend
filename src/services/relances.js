@@ -77,7 +77,12 @@ function getRelanceTemplate(stage, data) {
     <p style="font-size:0.75rem;color:#aaa">Email automatique envoyé par Losaro · contact : ${contactEmail}</p>
   </div>`;
 
-  const bonjour = `<p>Bonjour ${clientName || 'Madame, Monsieur'},</p>`;
+  // Promesse de paiement passée sans règlement : on le rappelle en tête, c'est l'argument le plus fort
+  const promesse = data.promesseDate ? new Date(data.promesseDate) : null;
+  const promesseTxt = promesse && !isNaN(promesse) && data.promesseDate < new Date().toISOString().slice(0, 10)
+    ? `<p>Vous nous aviez indiqué un règlement pour le <strong>${promesse.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Paris' })}</strong>. À ce jour, nous n'avons rien reçu.</p>`
+    : '';
+  const bonjour = `<p>Bonjour ${clientName || 'Madame, Monsieur'},</p>${promesseTxt}`;
   const contact = `<p>Pour toute question : <a href="mailto:${contactEmail}">${contactEmail}</a></p>`;
   // Mentions légales entre professionnels (art. L441-10 du Code de commerce)
   const penalites = `<p style="font-size:0.85rem;color:#555">Tout retard de paiement entraîne de plein droit des pénalités de retard ainsi qu'une indemnité forfaitaire de 40 € pour frais de recouvrement (article L441-10 du Code de commerce).</p>`;
@@ -202,6 +207,10 @@ async function processRelancesForCabinet(supabase, cabinet) {
 
   for (const f of factures || []) {
     if (!f.date_echeance || !f.client_email) continue;
+    // Relances mises en pause à la main, ou client qui a promis une date : on attend
+    if (f.relances_pause) continue;
+    const aujourdhui = now.toISOString().slice(0, 10);
+    if (f.promesse_date && f.promesse_date >= aujourdhui) continue;
 
     const dueDate = new Date(f.date_echeance);
     const daysLate = Math.floor((now - dueDate) / (1000 * 60 * 60 * 24));
@@ -221,6 +230,7 @@ async function processRelancesForCabinet(supabase, cabinet) {
       contactEmail,
       tvaRegime: cabinet.tva_regime,
       dateEcheance: f.date_echeance,
+      promesseDate: f.promesse_date,
       iban: cabinet.iban,
       bic: cabinet.bic,
       ibanTitulaire: cabinet.iban_titulaire,

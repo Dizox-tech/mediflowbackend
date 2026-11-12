@@ -112,6 +112,7 @@ router.post('/relances/send', requireAuth, async (req, res) => {
       contactEmail: req.cabinet.email || 'contact@losaro.fr',
       tvaRegime: req.cabinet.tva_regime,
       dateEcheance: f.date_echeance,
+      promesseDate: f.promesse_date,
       iban: req.cabinet.iban,
       bic: req.cabinet.bic,
       ibanTitulaire: req.cabinet.iban_titulaire,

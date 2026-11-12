@@ -255,11 +255,17 @@ router.post('/import', requireAuth, async (req, res) => {
 
 // PATCH /api/factures/:id
 router.patch('/:id', requireAuth, async (req, res) => {
-  const allowedFields = ['montant', 'montant_ht', 'tva', 'description', 'date_echeance', 'date_emission', 'statut', 'reference'];
+  const allowedFields = ['montant', 'montant_ht', 'tva', 'description', 'date_echeance', 'date_emission', 'statut', 'reference', 'promesse_date', 'relances_pause'];
   const updates = {};
   for (const field of allowedFields) {
     if (req.body[field] !== undefined) updates[field] = req.body[field];
   }
+  // Promesse de paiement : les relances automatiques attendent cette date, puis reprennent seules si rien n'est payé
+  if (updates.promesse_date !== undefined) {
+    if (updates.promesse_date === null || updates.promesse_date === '') updates.promesse_date = null;
+    else if (!/^\d{4}-\d{2}-\d{2}$/.test(updates.promesse_date)) return res.status(400).json({ error: 'Date de promesse invalide.' });
+  }
+  if (updates.relances_pause !== undefined) updates.relances_pause = updates.relances_pause === true;
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Aucun champ à mettre à jour.' });
 
   try {
